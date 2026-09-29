@@ -18,13 +18,15 @@ Insecure Direct Object Reference (IDOR) is an access control vulnerability that 
 
 For example:
 
-**Original request:**
-
-`GET /download-transcript/2.txt`
+```http
+GET /download-transcript/2.txt
+```
 
 If changing the identifier to:
 
-`GET /download-transcript/1.txt`
+```http
+GET /download-transcript/1.txt
+```
 
 allows a user to access another user's transcript, the application has an access control vulnerability.
 
@@ -36,9 +38,15 @@ The application contains a live chat feature where users can view and download c
 
 After using the chat functionality, Burp Suite captured the following request:
 
-`GET /download-transcript/2.txt HTTP/2`
+```http
+GET /download-transcript/2.txt HTTP/2
+```
 
 The `2.txt` portion acts as a direct reference to a transcript.
+
+### Initial Chat
+
+![Initial chat](01-chat.png.png)
 
 ---
 
@@ -52,7 +60,9 @@ The request was captured using:
 
 The relevant request was:
 
-`GET /download-transcript/2.txt HTTP/2`
+```http
+GET /download-transcript/2.txt HTTP/2
+```
 
 ### Step 2 — Send the Request to Repeater
 
@@ -62,23 +72,35 @@ The original request was sent first to establish a baseline response.
 
 ### Step 3 — Modify the Object Reference
 
-The following change was made:
+The original request referenced:
 
-**Original:**
+```http
+/download-transcript/2.txt
+```
 
-`/download-transcript/2.txt`
+The object identifier was modified to:
 
-**Modified:**
-
-`/download-transcript/1.txt`
+```http
+/download-transcript/1.txt
+```
 
 No other part of the request was changed.
+
+### Original Request
+
+![Original request](02-original-request.png.png)
+
+### Modified Request
+
+![Modified request](03-modified-request.png.png)
 
 ### Step 4 — Analyze the Response
 
 The modified request returned:
 
-`HTTP/2 200 OK`
+```http
+HTTP/2 200 OK
+```
 
 The response contained a different user's transcript.
 
@@ -90,13 +112,25 @@ This demonstrated that the server did not properly verify whether the authentica
 
 The application trusted a user-controlled object reference:
 
-`/download-transcript/1.txt`
+```text
+/download-transcript/1.txt
+                    ↑
+              Object reference
+```
 
 The server returned the requested transcript without verifying ownership.
 
 The attack flow was:
 
-**Authenticated User → Requests transcript 1 → Server does not verify ownership → Another user's transcript returned**
+```text
+Authenticated User
+        ↓
+Requests transcript 1
+        ↓
+Server does not verify ownership
+        ↓
+Another user's transcript returned
+```
 
 This is an example of IDOR resulting in horizontal privilege escalation.
 
@@ -126,9 +160,11 @@ The root cause is insufficient server-side authorization.
 
 The vulnerable logic is conceptually similar to:
 
-`const transcript = getTranscript(req.params.id);`
+```javascript
+const transcript = getTranscript(req.params.id);
 
-`return transcript;`
+return transcript;
+```
 
 The application retrieves the requested object but does not verify whether the authenticated user is authorized to access it.
 
@@ -140,23 +176,34 @@ The server should verify ownership or authorization before returning the resourc
 
 For example:
 
-`const transcript = await getTranscript(req.params.id);`
+```javascript
+const transcript = await getTranscript(req.params.id);
 
-`if (transcript.ownerId !== req.user.id) {`
+if (transcript.ownerId !== req.user.id) {
+    return res.status(403).json({
+        message: "Forbidden"
+    });
+}
 
-`    return res.status(403).json({`
-
-`        message: "Forbidden"`
-
-`    });`
-
-`}`
-
-`return res.send(transcript);`
+return res.send(transcript);
+```
 
 The important authorization flow is:
 
-**Requested Resource → Check Ownership → Check Authorization → Authorized: Return Resource / Unauthorized: 403 Forbidden**
+```text
+Requested Resource
+        ↓
+Check Ownership
+        ↓
+Check Authorization
+        ↓
+Authorized?
+   ↓           ↓
+ YES          NO
+  ↓            ↓
+Return      403 Forbidden
+Resource
+```
 
 ---
 
@@ -164,13 +211,15 @@ The important authorization flow is:
 
 This lab demonstrates an important distinction:
 
-**Authentication**
+```text
+Authentication
+      ↓
+"Who are you?"
 
-Who are you?
-
-**Authorization**
-
-Are you allowed to access this resource?
+Authorization
+      ↓
+"Are you allowed to access THIS resource?"
+```
 
 A user being authenticated does not mean they are authorized to access every resource.
 
@@ -178,15 +227,57 @@ A user being authenticated does not mean they are authorized to access every res
 
 ## 9. Burp Suite Workflow
 
-**Browser → Burp Proxy → HTTP History → Identify Object Reference → Send to Repeater → Modify Object Identifier → Send Request → Analyze Response → Determine Whether Authorization Is Enforced**
+```text
+Browser
+   ↓
+Burp Proxy
+   ↓
+HTTP History
+   ↓
+Identify Object Reference
+   ↓
+Send to Repeater
+   ↓
+Modify Object Identifier
+   ↓
+Send Request
+   ↓
+Analyze Response
+   ↓
+Determine Whether Authorization Is Enforced
+```
 
 ---
 
-## 10. Key Takeaway
+## 10. Evidence
+
+The following screenshots document the testing process:
+
+### 1. Initial Chat
+
+![Initial chat](01-chat.png.png)
+
+### 2. Original Transcript Request
+
+![Original request](02-original-request.png.png)
+
+### 3. Modified Transcript Request
+
+![Modified request](03-modified-request.png.png)
+
+### 4. Carlos Account
+
+![Carlos account](04-carlos-account.png.png)
+
+These screenshots show the progression from interacting with the application, capturing the original request, modifying the object reference, and confirming unauthorized access.
+
+---
+
+## 11. Key Takeaway
 
 The important lesson is not simply:
 
-**Change `2` to `1`.**
+> Change `2` to `1`.
 
 The actual security lesson is:
 
